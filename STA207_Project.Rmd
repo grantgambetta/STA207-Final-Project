@@ -1,0 +1,434 @@
+---
+title: "STA 207 Project Draft Report"
+author: "Grant Gambetta"
+date: "3/1/2022"
+output:
+  html_document: default
+---
+
+## Introduction
+On January 30, 2020, the World Health Organization (WHO) declared a public health emergency after an outbreak of COVID-19 took place in Wuhan, China. Since this initial outbreak, COVID-19 has spread around the world and as of March 1, 2022, there have been 437,333,859 confirmed COVID-19 cases and 5,960,972 confirmed deaths worldwide according to the [WHO](https://www.who.int/emergencies/diseases/novel-coronavirus-2019). 
+
+Throughout the course of the COVID-19 pandemic, countries have taken a similar approach to contain and minimize the spread of COVID-19 through enacting various policies. A few of the common policies that we tend to hear about are school closures, restaurant closures, mask requirements, and social distancing policies. There are obviously many different policies which have been implemented to contain COVID-19, and for this project, my team had the goal of investigating several of these policies to determine if they have had an effect on the spread of COVID-19. With that being said, the primary goal of my specific project was to determine if COVID-19 testing, contact tracing, and facial covering policies had an effect on daily COVID-19 cases in six different countries. The six countries I chose for this analysis were China, India, United States, Indonesia, Brazil, and Pakistan due to their large population sizes. This leads me to define my main question of interest which is: How do testing, contact tracing, and facial covering policies affect COVID cases? It is important to clarify that while I am attempting to determine whether certain policies have an effect on the number of new COVID cases, causal inference will not be applied. This is because the WHO COVID-19 dataset is a time series, which means it is observational data and not randomly sampled data. Therefore, my results and conclusions will not be as a result of causal inference, but rather general associations.
+
+## Datasets
+For this project, three main datasets were utilized, which were the WHO COVID-19 dataset, University of Oxford's [COVID-19 Government Response dataset](https://github.com/OxCGRT/covid-policy-tracker/blob/master/data/OxCGRT_latest.csv), and The World Bank's [Total Population dataset](https://data.worldbank.org/indicator/SP.POP.TOTL). 
+
+```{r, message=F, warning=F, include=F}
+library(dplyr)
+library(ggplot2)
+library(stargazer)
+library(lubridate)
+library(plm)
+library(pander)
+library(lmtest)
+library(zoo)
+library(kableExtra)
+library(car)
+library(gplots)
+library(tseries)
+```
+
+To begin with, the WHO is a time series dataset that consists of the number of daily and cumulative COVID-19 cases and deaths by country, starting on January 1, 2020 and ending on the present day. The dataset is updated on a daily basis and can be downloaded [here](https://covid19.who.int/WHO-COVID-19-global-data.csv). The table below highlights some of the most important variables from the dataset.
+
+```{r, echo = F}
+text_tbl <- data.frame(
+  Variable = c('Date Reported', 'Country', 'New Cases', 'Cumulative Cases', 'New Deaths', 'Cumulative Deaths'),
+  Description = c(
+    'Date that the data was reported to the WHO',
+    'Country or territory', 
+    'Number of new confirmed COVID-19 cases',
+    'Total number of confirmed COVID-19 cases',
+    'Number of new confirmed COVID-19 deaths', 
+    'Total number of confirmed COVID-19 deaths'
+  )
+)
+
+kbl(text_tbl) %>%
+  kable_paper(full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+Next, Oxford's COVID-19 Government Response dataset tracks the daily government responses to the COVID pandemic in all countries, through using factor variables to denote the various policies and the levels that they are currently implemented. All of the government response information in the dataset is collected by a team of over 200 volunteers from Oxford and is updated daily. The dataset consists of 23 different factor variables that track government policies beginning on January 1, 2020 and ending on the present day. For simplicity, the table below consists of descriptions for the variables that were of interest in this project.
+
+```{r, echo = F}
+text_tbl <- data.frame(
+  Variable = c('Country Name', 'Jurisdiction', 'Date', 'H2 Testing Policy', 'H3 Contact tracing', 'H6 Facial coverings'),
+  Description = c(
+    'Country or territory',
+    'Level of the record: national or regional', 
+    'Date of the report',
+    'Testing policy that is currently in place',
+    'Contact tracing policy that is currently in place', 
+    'Facial covering policy that is currently in place'
+  )
+)
+
+kbl(text_tbl) %>%
+  kable_paper(full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+With regard to `H2 Testing Policy`, there are four levels which are denoted as:  
+
+- 0: No testing policy in place, a.k.a no testing available
+- 1: Testing available to only people with symptoms or who meet specific criteria
+- 2: Testing announced as available for all symptomatic people or all people in suspicion of being in contact with a case
+- 3: Widespread testing available to everyone
+
+With regard to `H3 Contact Tracing`, there are three levels which are denoted as:  
+
+- 0: No contact tracing is done
+- 1: Contact tracing is done for some cases, based on availability of contact tracing resources
+- 2: Contact tracing is done for all identified cases and the country has adequate contact tracing resources
+
+With regard to `H6 Facial Coverings`, there are five levels which are denoted as:  
+
+- 0: No facial covering policy in place
+- 1: Masks are rarely required, except for special events such as events with lots of people
+- 2: Masks are required indoors and other specific locations (perhaps events with a lot of people)
+- 3: Masks are required in crowded areas outside (such as crowded streets) and all indoor areas
+- 4: Masks are required at all times when leaving the house, no exception
+
+The World Bank's Total Population dataset consists of the total population for over 250 countries/regions in 2020. Unfortunately, the dataset did not contain population information for 2021. The table below provides descriptions of the variables that were used from this dataset.
+
+```{r, echo = F}
+text_tbl <- data.frame(
+  Variable = c('Country Name', '2020'),
+  Description = c('Country or territory', 'Total population in 2020')
+)
+
+kbl(text_tbl) %>%
+  kable_paper(full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+## Descriptive Analysis
+### Data Preprocessing
+Before any exploratory or statistical analysis could be performed, the datasets had to be preprocessed and merged. First, I ensured that all the variable data types were proper, for example in the WHO dataset, `Date Reported` was interpreted by R as a character instead of a date. Also, there were a few inconsistencies in the country names, for example in the WHO dataset, the USA was denoted as "United States of America" and in the two other datasets, USA was denoted as "United States." Therefore, I had to make sure the country names were consistent in all three datasets. I then joined the three datasets together on the `Date` and `Country` columns, which resulted in a dataframe with 108,455 observations. Next, I filtered the final dataset for the six countries (China, India, United States, Indonesia, Brazil, and Pakistan) that will be analyzed in this project and that resulted in a final dataframe with roughly 4000 observations, from January 3, 2020 to the present day. Lastly, I created two additional columns in the final dataset, which were case fatality rate (denoted CFR) and number of cases per 100,000. After the merging was complete, the final dataset was inspected one last time for any data quality issues.
+
+```{r, message=F, warning=F, include=F}
+# read in covid data
+WHO_covid <- read.csv('https://covid19.who.int/WHO-COVID-19-global-data.csv')
+WHO_covid$Date_reported <- as.Date(WHO_covid$Date_reported)
+WHO_covid$Country <- replace(WHO_covid$Country, WHO_covid$Country == 'United States of America', 'United States')
+WHO_covid$CFR <- WHO_covid$Cumulative_deaths / WHO_covid$Cumulative_cases
+colnames(WHO_covid)[1] <- 'Date'
+WHO_covid <- WHO_covid %>% select(Date, Country, New_cases, New_deaths, Cumulative_cases, CFR)
+head(WHO_covid)
+```
+
+
+```{r, message=F, warning=F, include=F}
+# read in population data
+population <- read.csv('country_population_data.csv', header = T)
+population <- population %>% select(Country.Name, X2020)
+colnames(population)[1] <- 'Country'
+colnames(population)[2] <- 'Population'
+head(population)
+```
+
+
+```{r, message=F, warning=F, include=F}
+# read in Oxford data and 
+oxford_covid <- read.csv('https://raw.githubusercontent.com/OxCGRT/covid-policy-tracker/master/data/OxCGRT_latest.csv')
+colnames(oxford_covid)[1] <- 'Country'
+oxford_covid <- oxford_covid %>% filter(Jurisdiction == 'NAT_TOTAL')
+oxford_covid <- oxford_covid %>% select(Country, Date, H2_Testing.policy, H3_Contact.tracing, H6_Facial.Coverings)
+oxford_covid <- transform(oxford_covid, Date = as.Date(as.character(Date), '%Y%m%d'))
+head(oxford_covid)
+```
+
+
+```{r, message=F, warning=F, include=F}
+# merge the two datasets and filter the df for countries of interest
+df <- inner_join(WHO_covid, oxford_covid, by = c('Country', 'Date'))
+df <- inner_join(df, population, by = 'Country')
+df <- df %>% filter(Country %in% c('United States', 'China', 'India', 'Indonesia', 'Pakistan', 'Brazil')) %>% arrange(Date, Country)
+cols <- c('H2_Testing.policy', 'H3_Contact.tracing', 'H6_Facial.Coverings')
+df[cols] <- lapply(df[cols], factor)
+df$Cases_per_100k <- (df$New_cases / df$Population) * 100000
+head(df)
+dim(df)
+```
+
+### Exploratory Data Analysis
+To check the final dataset for anomalies, summary statistics such as the minimum, maximum, mean, and median were generated for the numeric variables and counts of each level in the factor variables were observed. The summary statistics table is below.
+
+```{r, echo = F}
+kbl(summary(df %>% select(-Date, -Country))) %>% kable_paper("hover", full_width = T)
+```
+
+Observing the summary statistics, we see that the minimum value in the `New_cases` column is -573, which is obviously an error in the data collection since there cannot be negative cases. Therefore, all the values in `New_cases` that were negative were replaced with 0. All of the other variables look sufficient based off of the summary statistics.
+
+Next, it was important to check the final dataset for missing values, and the table below shows the number of missing values in each variable.
+
+```{r, echo = F}
+na_count <- sapply(df, function(y) sum(length(which(is.na(y)))))
+na_count <- as.data.frame(na_count)
+colnames(na_count)[1] <- 'Missing_Values'
+kbl(na_count) %>% kable_paper("hover", full_width = F)
+```
+
+We see that there are missing values in all three of the factor variables and in the `Case fatality rate` variable. After further investigation, I found that the values for all three factor variables were "NA" from 2/16/2022 to present day in some of the countries. This could mean that there has been a delay in the reporting of government policies over the last few weeks in certain countries. Therefore, I believed the best way to go about this was to remove all the records that had missing values, since this would not be removing that many observations. After this, the preprocessing was complete and exploratory analysis was performed to understand the initial trends in the data.
+
+```{r, include=F}
+NAs <- df %>% filter(is.na(H2_Testing.policy)) %>% select(Date, Country, H2_Testing.policy, H3_Contact.tracing, H6_Facial.Coverings)
+NAs
+```
+
+
+```{r, message=F, warning=F, include=F}
+df <- na.omit(df)
+df$New_cases <- replace(df$New_cases, df$New_cases < 0, 0)
+```
+
+The exploratory analysis consisted of creating a series of visualizations to observe the overall trends in the dataset. First, I created a simple time series plot of COVID-19 cases overtime in the six countries of interest which can be found below.
+
+```{r, fig.height=5, fig.width=9, message=F, warning=F, echo=F}
+options(scipen=10000)
+ggplot(data = df, aes(Date, New_cases, col = Country, fill = Country)) + 
+  geom_area(alpha = 0.8) + 
+  labs(x = 'Date', y = 'Daily COVID-19 Cases') + 
+  ggtitle('COVID-19 Cases Overtime')
+```
+
+Looking at the above plot, we notice that there have been a few large spikes of COVID cases. Starting in roughly December 2020, there was a spike of cases in several countries such as the United States, India and Brazil which lasted until February. There was then a larger spike in India and Brazil starting in April 2021, which roughly lasted until June. Lastly, the largest spike took place very recently, starting in December 2021 and ending in late January or early February of 2022.
+
+Next, a time series plot of case fatality rate was created to determine if any of the countries have seen a higher proportion of deaths due to COVID than others. The case fatality rate is calculated as $\frac{\text{Total Number of Deaths}}{\text{Total Number of Cases}}$.
+
+```{r, fig.height=5, fig.width=9, message=F, warning=F, echo=F}
+ggplot(data = df, aes(Date, CFR, col = Country, fill = Country)) + 
+  geom_line(alpha = 0.8) +
+  labs(x = 'Date', y = 'Case Fatality Rate') + 
+  ggtitle('Case Fatality Rate Overtime')
+```
+
+Observing the above graph, we see that at the beginning of the pandemic from March 2020 to May 2020, Indonesia had the highest case fatality rate among the six countries. However, over the greater course of the pandemic, China has had the highest case fatality rate until very recently, since we see China's case fatality has dropped significantly over the last month. 
+
+```{r, warning=F, message=F, echo=F, fig.width=10, fig.height=7, fig.show='hide'}
+par(mfrow=c(2,2))
+plotmeans(New_cases ~ H2_Testing.policy, data = df, connect = F, xlab = 'Testing Policy', ylab = 'New Cases', main = 'Main Effects Plot for Testing Policy') 
+plotmeans(New_cases ~ H3_Contact.tracing, data = df, connect = F, xlab = 'Contact Tracing Policy', ylab = 'New Cases', main = 'Main Effects Plot for Contact Tracing Policy')
+plotmeans(New_cases ~ H6_Facial.Coverings, data = df, connect = F, xlab = 'Facial Covering Policy', ylab = 'New Cases', main = 'Main Effects Plot for Facial Covering Policy')
+```
+
+## Inferential Analysis
+### Model Overview
+To determine whether government policies such as testing, contact tracing, and facial covering policies have an effect on daily COVID-19 cases, I originally planned to utilize a [panel regression](https://www.econometrics-with-r.org/10-rwpd.html) model. Panel regression is a type of regression model that is used for panel (longitudinal) data and allows for controlling of panel effects and time effects. Given that the dataset is a time series, I believed this model was well suited to solve this problem since it allows for control of time effects. To implement the panel regression model, I used the `plm` package in R and specifically the `plm()` function. The `plm()` function works in a similar manner to the common `lm()` function, which made the implementation somewhat straightforward. 
+
+The panel regression model ended up having several challenges and caveats, which made it clear that the model was not robust and therefore made it difficult to trust the results. Specifically, the fitted model violated the four main assumptions of normality, equal variance, no serial correlation, and exogeneity. Therefore, an ANOVA model was used as a second model in attempt to answer the questions of interest more reliably.
+
+```{r, message=F, warning=F, include=F}
+log_df <- df
+log_df$New_cases_log <- log(df$New_cases)
+log_df$New_cases_log[log_df$New_cases_log == '-Inf'] = 0
+log_df$year <- as.factor(year(log_df$Date))
+log_df$month <- as.factor(month(log_df$Date))
+log_df <- log_df %>% group_by(Country) %>% mutate(New_cases_lagged = dplyr::lag(New_cases, 14))
+log_df <- log_df %>% filter(Date >= '2020-04-01')
+log_df <- log_df %>%
+    dplyr::group_by(Country) %>% 
+    dplyr::mutate(CFR_7dra = zoo::rollmean(CFR, k = 14, fill = NA)) %>% 
+  dplyr::ungroup()
+head(log_df, 30)
+```
+
+### Model Fitting
+Initially, the main goal was to develop a panel regression model that would be able to control for time effects and reduce omitted variable bias. Panel regression models can contain fixed effects or random effects, however, given that the dataset is a time series and is therefore not randomized, I chose to use a fixed effects model. Additionally I applied a log transformation to the response variable (new cases) because when I fit the baseline model, the residuals were extremely skewed. Therefore, the equation for the proposed fixed effects panel regression model was as follows
+
+$$
+\text{log}(\text{New_cases})_{it} = \beta_0 + \beta_1\text{Testing_Policy}_{it} + \beta_2\text{Contact_Tracing_Policy}_{it} + \beta_3\text{Facial_Covering_Policy}_{it} + u_{it}
+$$
+
+where  
+- $\text{log}$ is the log of daily cases (response/outcome)  
+- $i = 1,...,6$ since there are 6 countries  
+- $t = 1,...,700$ since there are 700 dates currently  
+- $\beta_0$ is the intercept  
+- $\beta_1$ is the estimated coefficient for testing policy for country $i$ on date $t$  
+- $\beta_2$ is the estimated coefficient for contact tracing policy for country $i$ on date $t$  
+- $\beta_3$ is the estimated coefficient for facial covering policy for country $i$ on date $t$  
+- $u$ is the error that the predictors do not capture  
+
+```{r, message=F, warning=F, include=F}
+# panel regression
+fixed_plm <- plm(New_cases_log ~ H2_Testing.policy + H3_Contact.tracing + H6_Facial.Coverings + as.factor(Country) + month, data = log_df, index = c('Country', 'Date'), model = 'within')
+summary(fixed_plm)
+```
+
+
+```{r, message=F, warning=F, include=F}
+# panel regression
+random_plm <- plm(New_cases_log ~ H2_Testing.policy + H3_Contact.tracing, data = log_df, index = c('Country', 'Date'), model = 'random')
+summary(random_plm)
+```
+
+
+```{r, message=F, warning=F, include=F}
+# test for time fixed effects for plm model
+plmtest(fixed_plm)
+```
+
+### Model Interpretation and Results
+After fitting the model, the regression summary was generated to observe whether the estimated coefficients were statistically significant and was used to answer the questions of interest. The panel regression summary table is below. 
+
+```{r, include=F}
+stargazer(fixed_plm, type = 'html')
+```
+
+<center> 
+<table style="text-align:center"><tr><td colspan="2" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="1" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td>New_cases_log</td></tr>
+<tr><td colspan="2" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">H2_Testing.policy2</td><td>1.280<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.084)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H2_Testing.policy3</td><td>0.863<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.067)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H3_Contact.tracing1</td><td>-0.766<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.105)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H3_Contact.tracing2</td><td>-1.028<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.097)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H6_Facial.Coverings1</td><td>0.622<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.237)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H6_Facial.Coverings2</td><td>0.569<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.169)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H6_Facial.Coverings3</td><td>0.099</td></tr>
+<tr><td style="text-align:left"></td><td>(0.155)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left">H6_Facial.Coverings4</td><td>0.863<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.151)</td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td></tr>
+<tr><td colspan="2" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>4,159</td></tr>
+<tr><td style="text-align:left">R<sup>2</sup></td><td>0.218</td></tr>
+<tr><td style="text-align:left">Adjusted R<sup>2</sup></td><td>0.213</td></tr>
+<tr><td style="text-align:left">F Statistic</td><td>60.547<sup>***</sup> (df = 19; 4134)</td></tr>
+<tr><td colspan="2" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+</center>
+
+Observing the coefficients for the three factors (testing policy, contact tracing policy, and facial covering policy), we notice that all of them except for the coefficient for level 3 of facial covering policy are statistically significant at $\alpha=0.05$. Additionally, the R-squared and adjusted R-squared values are 0.218 and 0.213, respectively, which means the predictors can explain roughly 21% of the variance in the `log(New_cases)` outcome. 
+
+We see that for testing policies, the coefficient for level 2 was 1.280 and for level 3 was 0.863, which means that the `log(New_cases)` increased in the six countries while they were in these two levels of testing policy. However, since the coefficient for level 3 was smaller than the coefficient of level 2, this implies that the number of new cases increased less while the countries had testing available to everyone (level 3).
+
+For contact tracing policies, the coefficients for levels 1 and 2 were -0.766 and -1.028, respectively. As a reminder, level 1 meant that contact tracing is done for some COVID cases based on availability of resources and level 2 denoted contact tracing is done for all cases and that the country had adequate resources to carry out contact tracing. Given that both of the coefficients were negative, this means that `log(New_cases)` decreased as a result of contact tracing in general. More specifically, when contact tracing was done for all cases and the countries had adequate resources, this resulted in a larger decrease in `log(New_cases)` since the coefficient for level 2 was smaller than the coefficient of level 1.
+
+Lastly, for facial covering policies, the coefficients for levels 1, 2, and 4 were 0.622, 0.569, and 0.863, respectively. As stated earlier, the coefficient for level 3 was not statistically significant at $\alpha=0.05$. Since all three of the significant coefficients were positive, this means that `log(New_cases)` did not decrease as a result of the facial covering policies in the six countries. It appears that the level 2 facial covering policy (masks are required indoors and other specific locations) caused `log(New_cases)` to increase less since the coefficient for level 2 was smaller than the coefficient of level 1. However, the coefficient for level 4 (masks are required at all times when leaving the house) was larger than the coefficients for both levels 1 and 2. 
+
+## Sensitivity Analysis
+As discussed briefly earlier, the panel regression model is expected to satisfy the following [assumptions](https://www.econometrics-with-r.org/10-5-tferaaseffer.html):  
+
+1. Normality of residuals
+2. Homoscedasticity (equal variance of residuals)
+3. No cross sectional dependence
+4. No serial correlation
+
+Model diagnostics were conducted to determine if the model satisfied each of these assumptions. First, the normality assumption was checked using a normal Q-Q plot and the Shapiro-Wilk normality test. The normal Q-Q plot is below.
+
+```{r, message=F, warning=F, echo=F}
+qqnorm(residuals(fixed_plm), ylab = 'Residuals')
+qqline(residuals(fixed_plm))
+```
+
+Observing the normal Q-Q plot, it appears that the residuals are a bit heavy tailed, which most likely means the normality assumption does not hold. To verify the observations from the normal Q-Q plot, the Shapiro-Wilk normality test was conducted at $\alpha=0.05$ with $H_0$ being the residuals are normally distributed. The p-value from the Shapiro-Wilk test was less than 0.05, which allows us to reject $H_0$ and conclude that the normality assumption does not hold.
+
+```{r, message=F, warning=F, include=F}
+shapiro.test(fixed_plm$residuals)
+```
+
+Next, the equal variance (homoscedasticity) assumption was checked using a residuals vs fitted plot and the Breusch-Pagan test against heteroskedasticity. Below is the residuals vs fitted plot.
+
+```{r, message=F, warning=F, echo=F}
+ggplot(data = NULL, aes(fitted(fixed_plm), residuals(fixed_plm))) + 
+  geom_point() + 
+  xlab('Fitted') + 
+  ylab('Residuals') + 
+  ggtitle('Residuals vs Fitted Plot for Fixed Effects PLM')
+```
+
+Observing the residuals vs fitted plot, it appears that the residual variance is unequal because the points are unevenly spread around 0 and look somewhat clustered. To verify the conclusion made from the residuals vs fitted plot, the Breusch-Pagan test was conducted at $\alpha=0.05$ with $H_0$ being the residual variances are equal (homoscedasticity). The p-value from the Breusch-Pagan test was less than 0.05, which allows us to reject $H_0$ and conclude that the residual variances are not equal (heteroskedasticity). Therefore, the equal variance assumption does not hold.
+
+```{r, message=F, warning=F, include=F}
+# Breusch-Pagan test for heteroskedasticity
+bptest(fixed_plm)
+```
+
+Next, the assumption of no serial correlation was checked. Serial correlation is defined as when there is correlation between the current value of a variable and the lagged value of that variable from earlier timeframes. To check whether serial correlation was present, the Breusch-Godfrey test was utilized. The test was conducted at $\alpha=0.05$ with $H_0$ being there is no serial correlation present. The p-value was less than 0.05 which allowed us to reject $H_0$ and conclude that there is serial correlation present. Therefore, the assumption of no serial correlation does not hold.
+
+```{r, message=F, warning=F, include=F}
+# Breusch-Godfrey/Wooldridge test for serial correlation
+pbgtest(fixed_plm)
+```
+
+After conducting model diagnostics, we clearly see that the model is not robust given that the assumptions are not met. Therefore, this has to be taken into consideration when considering the results. My main goal for the remainder of the project is to try and improve the model so it is able to satisfy the assumptions or perhaps try a different type of model.
+
+```{r, message=F, warning=F, echo=F, include=F}
+log_df <- log_df[c(-23, -1223, -3241, -3811, -4131, -4135, -4137, -4159),] # remove outliers
+anova <- aov(New_cases_log ~ H2_Testing.policy + H3_Contact.tracing + H6_Facial.Coverings + as.factor(Country) + month, data = log_df)
+summary(anova)
+```
+
+
+```{r, message=F, warning=F, echo=F, fig.show='hide'}
+plot(anova, which = 1)
+plot(anova, which = 2)
+hist(anova$residuals)
+```
+
+
+```{r, include=F}
+# Levene's test for homogeneity of variance
+leveneTest(anova$residuals, log_df$New_cases)
+```
+
+
+```{r, include=F}
+# Shapiro-Wilk test for normality
+shapiro.test(anova$residuals)
+```
+
+
+```{r, include=F}
+TukeyHSD(anova, conf.level = 0.95)
+```
+
+
+## Conclusion
+Summarizing my results so far, I have found that the number of new cases tend to increase less when countries have testing available to everyone. Also, I determined that the number of new new cases decreased as a result of contact tracing in general, however, when contact tracing was done for all cases and the countries had adequate resources, this resulted in a larger decrease. Lastly, it was determined that the number of new cases did not decrease as a result of facial covering policies being enacted in the six countries. Lastly, as I stated earlier, the panel regression model does not currently satisfy its assumptions, which means the results that I have discussed may not be fully accurate. This is something I will try to improve throughout the remainder of this project.
+
+## References 
+(Will be formatting in APA or MLA format for the final report)  
+
+- [1] https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0242398#:~:text=Most%20models%20developed%20to%20predict,into%207%2Dday%20moving%20averages  
+- [2] Oxford COVID-19 Dataset: https://github.com/OxCGRT/covid-policy-tracker/blob/master/data/OxCGRT_latest.csv  
+- [3] World Population Dataset: https://data.worldbank.org/indicator/SP.POP.TOTL  
+- [4] Panel Regression: https://www.econometrics-with-r.org/10-rwpd.html  
+- [5] Panel Regression in R: https://www.princeton.edu/~otorres/Panel101R.pdf  
+- [6] Panel Regression assumptions: https://www.econometrics-with-r.org/10-5-tferaaseffer.html  
+- [7] COVID-19 Pandemic Background: https://www.aapmr.org/members-publications/covid-19/covid-19-background-information  
+- [8] COVID-19 Statistics: who.int/emergencies/diseases/novel-coronavirus-2019  
+
+
+```{r, out = F, results = 'hide', message = F, fig.show = 'hide', include=F}
+library(dplyr)
+library(ggplot2)
+library(stargazer)
+library(lubridate)
+library(plm)
+library(pander)
+library(lmtest)
+library(zoo)
+library(kableExtra)
+library(car)
+library(gplots)
+library(tseries)
+
+```
+
