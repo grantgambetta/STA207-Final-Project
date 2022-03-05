@@ -217,7 +217,7 @@ plotmeans(New_cases ~ H6_Facial.Coverings, data = df, connect = F, xlab = 'Facia
 ### Model Overview
 To determine whether government policies such as testing, contact tracing, and facial covering policies have an effect on daily COVID-19 cases, I originally planned to utilize a [panel regression](https://www.econometrics-with-r.org/10-rwpd.html) model. Panel regression is a type of regression model that is used for panel (longitudinal) data and allows for controlling of panel effects and time effects. Given that the dataset is a time series, I believed this model was well suited to solve this problem since it allows for control of time effects. To implement the panel regression model, I used the `plm` package in R and specifically the `plm()` function. The `plm()` function works in a similar manner to the common `lm()` function, which made the implementation somewhat straightforward. 
 
-The panel regression model ended up having several challenges and caveats, which made it clear that the model was not robust and therefore made it difficult to trust the results. Specifically, the fitted model violated the four main assumptions of normality, equal variance, no serial correlation, and exogeneity. Therefore, an ANOVA model was used as a second model in attempt to answer the questions of interest more reliably.
+The panel regression model ended up having several challenges and caveats, which made it clear that the model was not robust and therefore made it difficult to trust the results. Specifically, the fitted model violated the four main assumptions of normality, equal variance, no serial correlation, and exogeneity.  
 
 ```{r, message=F, warning=F, include=F}
 log_df <- df
