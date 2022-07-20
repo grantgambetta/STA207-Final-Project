@@ -1,4 +1,4 @@
-# STA207-Final-Project
+# STA207 Final Project
 
 To reproduce the report, please follow the steps outlined below. 
 
